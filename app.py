@@ -102,92 +102,89 @@ if page == "Home":
 elif page == "Live Simulation":
     import plotly.graph_objs as go
 
-    st.title("🟢 Live Simulation")
-    st.info("Simulate live trading with advanced chart and trade log. Select a symbol and run the simulation.")
+    st.title("🟢 Auto-Trader Simulation (All Assets)")
+    st.info("This agent will auto-trade all selected stocks and crypto, showing TradingView-style charts with buy/sell markers and timestamps for each asset.")
 
-    sim_symbol = st.selectbox("Symbol for Live Simulation", symbols)
     sim_profit_pct = st.number_input("Profit Target (%)", min_value=1, max_value=100, value=10)
-    sim_start = st.button("Start Simulation")
+    sim_start = st.button("Start Auto-Trader Simulation")
 
-    if 'sim_state' not in st.session_state or sim_start:
-        st.session_state.sim_state = {
-            'step': 30,
-            'balance': initial_balance,
-            'in_position': False,
-            'entry': 0,
-            'position_size': 0,
-            'trades': [],
-            'done': False
+    # State: one dict per symbol
+    if 'auto_states' not in st.session_state or sim_start:
+        st.session_state.auto_states = {
+            sym: {
+                'step': 30,
+                'balance': initial_balance / len(symbols) if len(symbols) > 0 else initial_balance,
+                'in_position': False,
+                'entry': 0,
+                'position_size': 0,
+                'trades': [],
+                'done': False
+            } for sym in symbols
         }
 
-    if st.button("Next Step", disabled=st.session_state.get('sim_state', {}).get('done', True)):
-        state = st.session_state.sim_state
-        df = all_data.get(sim_symbol)
-        if df is not None and state['step'] < len(df):
-            i = state['step']
-            price = float(df['Close'].iloc[i])
-            atr = float(df['ATR'].iloc[i]) if pd.notna(df['ATR'].iloc[i]) else 0
-            buy_signal, sell_signal = get_strategy_signals(df, i, strategy)
+    if st.button("Next Step (All Assets)"):
+        for sym in symbols:
+            state = st.session_state.auto_states[sym]
+            df = all_data.get(sym)
+            if df is not None and state['step'] < len(df) and not state['done']:
+                i = state['step']
+                price = float(df['Close'].iloc[i])
+                atr = float(df['ATR'].iloc[i]) if pd.notna(df['ATR'].iloc[i]) else 0
+                buy_signal, sell_signal = get_strategy_signals(df, i, strategy)
 
-            # ENTRY
-            if not state['in_position'] and buy_signal and atr > 0:
-                state['position_size'] = (state['balance'] * risk_per_trade) / atr
-                state['entry'] = price
-                state['in_position'] = True
-                state['trades'].append({
-                    'timestamp': df.index[i],
-                    'action': 'BUY',
-                    'price': price,
-                    'balance': state['balance']
-                })
-
-            # EXIT
-            if state['in_position']:
-                sl = state['entry'] - atr * 1.5
-                tp = state['entry'] + atr * 3
-                if price <= sl or price >= tp or sell_signal:
-                    pnl = (price - state['entry']) * state['position_size']
-                    state['balance'] += pnl
-                    state['in_position'] = False
+                # ENTRY
+                if not state['in_position'] and buy_signal and atr > 0:
+                    state['position_size'] = (state['balance'] * risk_per_trade) / atr
+                    state['entry'] = price
+                    state['in_position'] = True
                     state['trades'].append({
                         'timestamp': df.index[i],
-                        'action': 'SELL',
+                        'action': 'BUY',
                         'price': price,
-                        'balance': state['balance'],
-                        'pnl': pnl
+                        'balance': state['balance']
                     })
 
-            # Rebuy logic (optional, for demonstration)
-            # If you want to show rebuy, you can add a condition here
+                # EXIT
+                if state['in_position']:
+                    sl = state['entry'] - atr * 1.5
+                    tp = state['entry'] + atr * 3
+                    if price <= sl or price >= tp or sell_signal:
+                        pnl = (price - state['entry']) * state['position_size']
+                        state['balance'] += pnl
+                        state['in_position'] = False
+                        state['trades'].append({
+                            'timestamp': df.index[i],
+                            'action': 'SELL',
+                            'price': price,
+                            'balance': state['balance'],
+                            'pnl': pnl
+                        })
 
-            # Check stop conditions
-            profit_target = initial_balance * (1 + sim_profit_pct / 100)
-            if state['balance'] >= profit_target:
-                st.success(f"Profit target reached: ${state['balance']:.2f}")
-                state['done'] = True
-            elif state['balance'] < initial_balance:
-                st.error(f"Balance dropped below initial: ${state['balance']:.2f}")
-                state['done'] = True
-            else:
-                state['step'] += 1
+                # Check stop conditions
+                profit_target = (initial_balance / len(symbols)) * (1 + sim_profit_pct / 100)
+                if state['balance'] >= profit_target:
+                    state['done'] = True
+                elif state['balance'] < (initial_balance / len(symbols)):
+                    state['done'] = True
+                else:
+                    state['step'] += 1
 
-        st.session_state.sim_state = state
+            st.session_state.auto_states[sym] = state
 
-    if 'sim_state' in st.session_state:
-        state = st.session_state.sim_state
-        st.subheader(f"Live Simulation: {sim_symbol}")
+    # Show charts and trade logs for each asset
+    for sym in symbols:
+        st.subheader(f"{sym} Auto-Trader Simulation")
+        state = st.session_state.auto_states[sym]
         st.write(f"Current Step: {state['step']}")
         st.write(f"Current Balance: ${state['balance']:.2f}")
         st.write(f"In Position: {state['in_position']}")
-        st.write(f"Profit Target: {sim_profit_pct}% (${initial_balance * (1 + sim_profit_pct / 100):.2f})")
-        st.write(f"Initial Balance: ${initial_balance:.2f}")
         st.write(f"Simulation {'Complete' if state.get('done') else 'Running'}")
         if state['trades']:
             trades_df = pd.DataFrame(state['trades'])
             st.dataframe(trades_df, use_container_width=True)
 
             # Plotly chart
-            df = all_data.get(sim_symbol)
+            df = all_data.get(sym)
             if df is not None:
                 fig = go.Figure()
                 fig.add_trace(go.Candlestick(
@@ -198,21 +195,21 @@ elif page == "Live Simulation":
                     close=df['Close'],
                     name='Price'))
 
-                # Plot buy/sell/rebuy markers
+                # Plot buy/sell markers
                 for _, t in trades_df.iterrows():
                     color = 'green' if t['action'] == 'BUY' else ('red' if t['action'] == 'SELL' else 'blue')
-                    symbol = 'triangle-up' if t['action'] == 'BUY' else ('triangle-down' if t['action'] == 'SELL' else 'circle')
+                    symbol_marker = 'triangle-up' if t['action'] == 'BUY' else ('triangle-down' if t['action'] == 'SELL' else 'circle')
                     fig.add_trace(go.Scatter(
                         x=[t['timestamp']],
                         y=[t['price']],
                         mode='markers',
-                        marker=dict(symbol=symbol, color=color, size=14),
+                        marker=dict(symbol=symbol_marker, color=color, size=14),
                         name=t['action'],
                         text=[f"{t['action']}<br>{t['timestamp']}<br>${t['price']:.2f}"],
                         hoverinfo='text'))
 
                 fig.update_layout(
-                    title=f"{sim_symbol} Price & Trades",
+                    title=f"{sym} Price & Trades",
                     xaxis_title="Time",
                     yaxis_title="Price",
                     xaxis_rangeslider_visible=False,
