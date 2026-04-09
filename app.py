@@ -326,6 +326,89 @@ if symbols:
         progress_bar.progress((idx + 1) / len(symbols))
 
 # =============================
+ # =============================
+# LIVE SIMULATION MODE
+# =============================
+st.sidebar.markdown("---")
+st.sidebar.header("🟢 Live Simulation Mode")
+live_symbol = st.sidebar.selectbox("Live Symbol", symbols)
+live_profit_pct = st.sidebar.number_input("Profit Target (%)", min_value=1, max_value=100, value=10)
+live_start = st.sidebar.button("Start Live Simulation")
+
+if 'live_state' not in st.session_state or live_start:
+    st.session_state.live_state = {
+        'step': 30,  # Start after indicators warm-up
+        'balance': initial_balance,
+        'in_position': False,
+        'entry': 0,
+        'position_size': 0,
+        'trades': [],
+        'done': False
+    }
+
+if st.button("Next Step", disabled=st.session_state.get('live_state', {}).get('done', True)):
+    state = st.session_state.live_state
+    df = all_data.get(live_symbol)
+    if df is not None and state['step'] < len(df):
+        i = state['step']
+        price = float(df['Close'].iloc[i])
+        atr = float(df['ATR'].iloc[i]) if pd.notna(df['ATR'].iloc[i]) else 0
+        buy_signal, sell_signal = get_strategy_signals(df, i, strategy)
+
+        # ENTRY
+        if not state['in_position'] and buy_signal and atr > 0:
+            state['position_size'] = (state['balance'] * risk_per_trade) / atr
+            state['entry'] = price
+            state['in_position'] = True
+            state['trades'].append({
+                'step': i,
+                'action': 'BUY',
+                'price': price,
+                'balance': state['balance']
+            })
+
+        # EXIT
+        if state['in_position']:
+            sl = state['entry'] - atr * 1.5
+            tp = state['entry'] + atr * 3
+            if price <= sl or price >= tp or sell_signal:
+                pnl = (price - state['entry']) * state['position_size']
+                state['balance'] += pnl
+                state['in_position'] = False
+                state['trades'].append({
+                    'step': i,
+                    'action': 'SELL',
+                    'price': price,
+                    'balance': state['balance'],
+                    'pnl': pnl
+                })
+
+        # Check stop conditions
+        profit_target = initial_balance * (1 + live_profit_pct / 100)
+        if state['balance'] >= profit_target:
+            st.success(f"Profit target reached: ${state['balance']:.2f}")
+            state['done'] = True
+        elif state['balance'] < initial_balance:
+            st.error(f"Balance dropped below initial: ${state['balance']:.2f}")
+            state['done'] = True
+        else:
+            state['step'] += 1
+
+    st.session_state.live_state = state
+
+if 'live_state' in st.session_state:
+    state = st.session_state.live_state
+    st.subheader(f"Live Simulation: {live_symbol}")
+    st.write(f"Current Step: {state['step']}")
+    st.write(f"Current Balance: ${state['balance']:.2f}")
+    st.write(f"In Position: {state['in_position']}")
+    st.write(f"Profit Target: {live_profit_pct}% (${initial_balance * (1 + live_profit_pct / 100):.2f})")
+    st.write(f"Initial Balance: ${initial_balance:.2f}")
+    st.write(f"Simulation {'Complete' if state.get('done') else 'Running'}")
+    if state['trades']:
+        st.dataframe(pd.DataFrame(state['trades']), use_container_width=True)
+
+# =============================
 # DISPLAY RESULTS
 # =============================
 if results:
