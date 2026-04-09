@@ -14,8 +14,211 @@ import matplotlib.pyplot as plt
 import requests
 from datetime import datetime
 
+
 st.set_page_config(layout="wide")
-st.title("🤖 Free Trading Bot - Open Data Sources")
+
+
+# =============================
+# SHARED VARIABLES (used by both pages)
+# =============================
+st.sidebar.header("⚙️ Trading Settings")
+symbols_input = st.sidebar.text_input(
+    "Symbols (comma separated)",
+    "AAPL,MSFT,GOOGL,TSLA,AMZN,JPM"
+)
+symbols = [s.strip().upper() for s in symbols_input.split(",") if s.strip()]
+
+initial_balance = st.sidebar.number_input("Initial Capital ($)", value=10000)
+target_value = st.sidebar.number_input("Target Value ($)", value=15000)
+risk_per_trade = st.sidebar.slider("Risk per Trade (%)", 1, 10, 2) / 100
+rebalance_threshold = st.sidebar.slider("Rebalance Drawdown (%)", 3, 20, 8) / 100
+
+strategy = st.sidebar.selectbox(
+    "Trading Strategy",
+    ["EMA Crossover", "RSI + MACD", "Bollinger Bands", "Combined"]
+)
+
+# =============================
+# PAGE NAVIGATION
+# =============================
+page = st.sidebar.radio("Navigate", ["Home", "Live Simulation"])
+
+# =============================
+# DATA SOURCE CONFIG (moved up for both pages)
+# =============================
+st.sidebar.header("📡 Data Sources")
+data_source = st.sidebar.selectbox(
+    "Primary Data Source",
+    ["Yahoo Finance (Free)", "Alpha Vantage (Free API)", "Finnhub (Free API)"]
+)
+
+# API Keys for free data sources
+if "Alpha Vantage" in data_source:
+    alpha_vantage_key = st.sidebar.text_input("Alpha Vantage API Key", type="password")
+elif "Finnhub" in data_source:
+    finnhub_key = st.sidebar.text_input("Finnhub API Key", type="password")
+
+# =============================
+# DATA LOADING (shared)
+# =============================
+api_key = None
+if "Alpha Vantage" in data_source:
+    api_key = alpha_vantage_key if "alpha_vantage_key" in locals() else None
+elif "Finnhub" in data_source:
+    api_key = finnhub_key if "finnhub_key" in locals() else None
+
+results = {}
+trade_log = []
+all_data = {}
+
+if symbols:
+    alloc = initial_balance / len(symbols)
+    progress_bar = st.progress(0)
+
+    for idx, sym in enumerate(symbols):
+        try:
+            df = get_stock_data(sym, data_source, api_key=api_key)
+            if df is not None and len(df) > 30:
+                equity, trades, df = run_backtest(df, alloc, strategy)
+                results[sym] = equity
+                trade_log.extend([{**t, "symbol": sym} for t in trades])
+                all_data[sym] = df
+            else:
+                st.warning(f"Insufficient data for {sym}")
+        except Exception as e:
+            st.warning(f"Error processing {sym}: {e}")
+
+        progress_bar.progress((idx + 1) / len(symbols))
+
+# =============================
+# HOME PAGE (default)
+# =============================
+if page == "Home":
+    st.title("🤖 Free Trading Bot - Open Data Sources")
+
+# =============================
+# LIVE SIMULATION PAGE (dedicated)
+# =============================
+elif page == "Live Simulation":
+    import plotly.graph_objs as go
+
+    st.title("🟢 Live Simulation")
+    st.info("Simulate live trading with advanced chart and trade log. Select a symbol and run the simulation.")
+
+    sim_symbol = st.selectbox("Symbol for Live Simulation", symbols)
+    sim_profit_pct = st.number_input("Profit Target (%)", min_value=1, max_value=100, value=10)
+    sim_start = st.button("Start Simulation")
+
+    if 'sim_state' not in st.session_state or sim_start:
+        st.session_state.sim_state = {
+            'step': 30,
+            'balance': initial_balance,
+            'in_position': False,
+            'entry': 0,
+            'position_size': 0,
+            'trades': [],
+            'done': False
+        }
+
+    if st.button("Next Step", disabled=st.session_state.get('sim_state', {}).get('done', True)):
+        state = st.session_state.sim_state
+        df = all_data.get(sim_symbol)
+        if df is not None and state['step'] < len(df):
+            i = state['step']
+            price = float(df['Close'].iloc[i])
+            atr = float(df['ATR'].iloc[i]) if pd.notna(df['ATR'].iloc[i]) else 0
+            buy_signal, sell_signal = get_strategy_signals(df, i, strategy)
+
+            # ENTRY
+            if not state['in_position'] and buy_signal and atr > 0:
+                state['position_size'] = (state['balance'] * risk_per_trade) / atr
+                state['entry'] = price
+                state['in_position'] = True
+                state['trades'].append({
+                    'timestamp': df.index[i],
+                    'action': 'BUY',
+                    'price': price,
+                    'balance': state['balance']
+                })
+
+            # EXIT
+            if state['in_position']:
+                sl = state['entry'] - atr * 1.5
+                tp = state['entry'] + atr * 3
+                if price <= sl or price >= tp or sell_signal:
+                    pnl = (price - state['entry']) * state['position_size']
+                    state['balance'] += pnl
+                    state['in_position'] = False
+                    state['trades'].append({
+                        'timestamp': df.index[i],
+                        'action': 'SELL',
+                        'price': price,
+                        'balance': state['balance'],
+                        'pnl': pnl
+                    })
+
+            # Rebuy logic (optional, for demonstration)
+            # If you want to show rebuy, you can add a condition here
+
+            # Check stop conditions
+            profit_target = initial_balance * (1 + sim_profit_pct / 100)
+            if state['balance'] >= profit_target:
+                st.success(f"Profit target reached: ${state['balance']:.2f}")
+                state['done'] = True
+            elif state['balance'] < initial_balance:
+                st.error(f"Balance dropped below initial: ${state['balance']:.2f}")
+                state['done'] = True
+            else:
+                state['step'] += 1
+
+        st.session_state.sim_state = state
+
+    if 'sim_state' in st.session_state:
+        state = st.session_state.sim_state
+        st.subheader(f"Live Simulation: {sim_symbol}")
+        st.write(f"Current Step: {state['step']}")
+        st.write(f"Current Balance: ${state['balance']:.2f}")
+        st.write(f"In Position: {state['in_position']}")
+        st.write(f"Profit Target: {sim_profit_pct}% (${initial_balance * (1 + sim_profit_pct / 100):.2f})")
+        st.write(f"Initial Balance: ${initial_balance:.2f}")
+        st.write(f"Simulation {'Complete' if state.get('done') else 'Running'}")
+        if state['trades']:
+            trades_df = pd.DataFrame(state['trades'])
+            st.dataframe(trades_df, use_container_width=True)
+
+            # Plotly chart
+            df = all_data.get(sim_symbol)
+            if df is not None:
+                fig = go.Figure()
+                fig.add_trace(go.Candlestick(
+                    x=df.index,
+                    open=df['Open'],
+                    high=df['High'],
+                    low=df['Low'],
+                    close=df['Close'],
+                    name='Price'))
+
+                # Plot buy/sell/rebuy markers
+                for _, t in trades_df.iterrows():
+                    color = 'green' if t['action'] == 'BUY' else ('red' if t['action'] == 'SELL' else 'blue')
+                    symbol = 'triangle-up' if t['action'] == 'BUY' else ('triangle-down' if t['action'] == 'SELL' else 'circle')
+                    fig.add_trace(go.Scatter(
+                        x=[t['timestamp']],
+                        y=[t['price']],
+                        mode='markers',
+                        marker=dict(symbol=symbol, color=color, size=14),
+                        name=t['action'],
+                        text=[f"{t['action']}<br>{t['timestamp']}<br>${t['price']:.2f}"],
+                        hoverinfo='text'))
+
+                fig.update_layout(
+                    title=f"{sim_symbol} Price & Trades",
+                    xaxis_title="Time",
+                    yaxis_title="Price",
+                    xaxis_rangeslider_visible=False,
+                    template="plotly_white"
+                )
+                st.plotly_chart(fig, use_container_width=True)
 
 # =============================
 # FREE DATA SOURCE CONFIG
@@ -61,6 +264,8 @@ def get_yahoo_data(symbol, period="1y", interval="1d"):
     """Fetch data from Yahoo Finance (free, no API key)"""
     try:
         df = yf.download(symbol, period=period, interval=interval, progress=False)
+        if df is None or not hasattr(df, 'columns'):
+            return None
         # Flatten multi-level columns if present
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
@@ -326,87 +531,6 @@ if symbols:
         progress_bar.progress((idx + 1) / len(symbols))
 
 # =============================
- # =============================
-# LIVE SIMULATION MODE
-# =============================
-st.sidebar.markdown("---")
-st.sidebar.header("🟢 Live Simulation Mode")
-live_symbol = st.sidebar.selectbox("Live Symbol", symbols)
-live_profit_pct = st.sidebar.number_input("Profit Target (%)", min_value=1, max_value=100, value=10)
-live_start = st.sidebar.button("Start Live Simulation")
-
-if 'live_state' not in st.session_state or live_start:
-    st.session_state.live_state = {
-        'step': 30,  # Start after indicators warm-up
-        'balance': initial_balance,
-        'in_position': False,
-        'entry': 0,
-        'position_size': 0,
-        'trades': [],
-        'done': False
-    }
-
-if st.button("Next Step", disabled=st.session_state.get('live_state', {}).get('done', True)):
-    state = st.session_state.live_state
-    df = all_data.get(live_symbol)
-    if df is not None and state['step'] < len(df):
-        i = state['step']
-        price = float(df['Close'].iloc[i])
-        atr = float(df['ATR'].iloc[i]) if pd.notna(df['ATR'].iloc[i]) else 0
-        buy_signal, sell_signal = get_strategy_signals(df, i, strategy)
-
-        # ENTRY
-        if not state['in_position'] and buy_signal and atr > 0:
-            state['position_size'] = (state['balance'] * risk_per_trade) / atr
-            state['entry'] = price
-            state['in_position'] = True
-            state['trades'].append({
-                'step': i,
-                'action': 'BUY',
-                'price': price,
-                'balance': state['balance']
-            })
-
-        # EXIT
-        if state['in_position']:
-            sl = state['entry'] - atr * 1.5
-            tp = state['entry'] + atr * 3
-            if price <= sl or price >= tp or sell_signal:
-                pnl = (price - state['entry']) * state['position_size']
-                state['balance'] += pnl
-                state['in_position'] = False
-                state['trades'].append({
-                    'step': i,
-                    'action': 'SELL',
-                    'price': price,
-                    'balance': state['balance'],
-                    'pnl': pnl
-                })
-
-        # Check stop conditions
-        profit_target = initial_balance * (1 + live_profit_pct / 100)
-        if state['balance'] >= profit_target:
-            st.success(f"Profit target reached: ${state['balance']:.2f}")
-            state['done'] = True
-        elif state['balance'] < initial_balance:
-            st.error(f"Balance dropped below initial: ${state['balance']:.2f}")
-            state['done'] = True
-        else:
-            state['step'] += 1
-
-    st.session_state.live_state = state
-
-if 'live_state' in st.session_state:
-    state = st.session_state.live_state
-    st.subheader(f"Live Simulation: {live_symbol}")
-    st.write(f"Current Step: {state['step']}")
-    st.write(f"Current Balance: ${state['balance']:.2f}")
-    st.write(f"In Position: {state['in_position']}")
-    st.write(f"Profit Target: {live_profit_pct}% (${initial_balance * (1 + live_profit_pct / 100):.2f})")
-    st.write(f"Initial Balance: ${initial_balance:.2f}")
-    st.write(f"Simulation {'Complete' if state.get('done') else 'Running'}")
-    if state['trades']:
-        st.dataframe(pd.DataFrame(state['trades']), use_container_width=True)
 
 # =============================
 # DISPLAY RESULTS
