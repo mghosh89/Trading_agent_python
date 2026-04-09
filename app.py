@@ -61,6 +61,11 @@ def get_yahoo_data(symbol, period="1y", interval="1d"):
     """Fetch data from Yahoo Finance (free, no API key)"""
     try:
         df = yf.download(symbol, period=period, interval=interval, progress=False)
+        # Flatten multi-level columns if present
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        # Ensure proper column names
+        df.columns = [col.title() if col.lower() in ['open', 'high', 'low', 'close', 'volume'] else col for col in df.columns]
         df.dropna(inplace=True)
         return df
     except Exception as e:
