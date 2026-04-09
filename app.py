@@ -24,6 +24,10 @@ target_value = st.sidebar.number_input("Target Value ($)", value=15000)
 max_loss_pct = st.sidebar.slider("Max Portfolio Loss (%)", 5, 50, 20) / 100
 risk_per_trade = st.sidebar.slider("Risk per Trade (%)", 1, 10, 2) / 100
 
+# Initialize session state
+if 'run_trading' not in st.session_state:
+    st.session_state.run_trading = False
+
 # =============================
 # DATA
 # =============================
@@ -101,7 +105,7 @@ def run_agent(df, capital):
 # =============================
 # RUN PORTFOLIO
 # =============================
-if symbols:
+if symbols and st.session_state.run_trading:
     alloc = initial_balance / len(symbols)
     results = {}
 
@@ -148,6 +152,14 @@ if symbols:
 
 else:
     st.info("Enter symbols to start")
+
+# =============================
+# SUBMIT BUTTON
+# =============================
+def start_trading():
+    st.session_state.run_trading = True
+
+st.button("🚀 Start Trading Agent", type="primary", use_container_width=True, on_click=start_trading)
 
 # =============================
 # SUMMARY
