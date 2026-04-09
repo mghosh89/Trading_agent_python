@@ -24,24 +24,26 @@ st.set_page_config(layout="wide")
 st.sidebar.header("⚙️ Trading Settings")
 symbols_input = st.sidebar.text_input(
     "Symbols (comma separated)",
-    "AAPL,MSFT,GOOGL,TSLA,AMZN,JPM"
+    "AAPL,MSFT,GOOGL,TSLA,AMZN,JPM",
+    key="symbols_input"
 )
 symbols = [s.strip().upper() for s in symbols_input.split(",") if s.strip()]
 
-initial_balance = st.sidebar.number_input("Initial Capital ($)", value=10000)
-target_value = st.sidebar.number_input("Target Value ($)", value=15000)
-risk_per_trade = st.sidebar.slider("Risk per Trade (%)", 1, 10, 2) / 100
-rebalance_threshold = st.sidebar.slider("Rebalance Drawdown (%)", 3, 20, 8) / 100
+initial_balance = st.sidebar.number_input("Initial Capital ($)", value=10000, key="initial_balance")
+target_value = st.sidebar.number_input("Target Value ($)", value=15000, key="target_value")
+risk_per_trade = st.sidebar.slider("Risk per Trade (%)", 1, 10, 2, key="risk_per_trade") / 100
+rebalance_threshold = st.sidebar.slider("Rebalance Drawdown (%)", 3, 20, 8, key="rebalance_threshold") / 100
 
 strategy = st.sidebar.selectbox(
     "Trading Strategy",
-    ["EMA Crossover", "RSI + MACD", "Bollinger Bands", "Combined"]
+    ["EMA Crossover", "RSI + MACD", "Bollinger Bands", "Combined"],
+    key="strategy_selectbox"
 )
 
 # =============================
 # PAGE NAVIGATION
 # =============================
-page = st.sidebar.radio("Navigate", ["Home", "Live Simulation"])
+page = st.sidebar.radio("Navigate", ["Home", "Live Simulation"], key="page_radio")
 
 # =============================
 # DATA SOURCE CONFIG (moved up for both pages)
@@ -49,14 +51,15 @@ page = st.sidebar.radio("Navigate", ["Home", "Live Simulation"])
 st.sidebar.header("📡 Data Sources")
 data_source = st.sidebar.selectbox(
     "Primary Data Source",
-    ["Yahoo Finance (Free)", "Alpha Vantage (Free API)", "Finnhub (Free API)"]
+    ["Yahoo Finance (Free)", "Alpha Vantage (Free API)", "Finnhub (Free API)"],
+    key="data_source_selectbox"
 )
 
 # API Keys for free data sources
 if "Alpha Vantage" in data_source:
-    alpha_vantage_key = st.sidebar.text_input("Alpha Vantage API Key", type="password")
+    alpha_vantage_key = st.sidebar.text_input("Alpha Vantage API Key", type="password", key="alpha_vantage_key")
 elif "Finnhub" in data_source:
-    finnhub_key = st.sidebar.text_input("Finnhub API Key", type="password")
+    finnhub_key = st.sidebar.text_input("Finnhub API Key", type="password", key="finnhub_key")
 
 # =============================
 # DATA LOADING (shared)
@@ -105,8 +108,8 @@ elif page == "Live Simulation":
     st.title("🟢 Auto-Trader Simulation (All Assets)")
     st.info("This agent will auto-trade all selected stocks and crypto, showing TradingView-style charts with buy/sell markers and timestamps for each asset.")
 
-    sim_profit_pct = st.number_input("Profit Target (%)", min_value=1, max_value=100, value=10)
-    sim_start = st.button("Start Auto-Trader Simulation")
+    sim_profit_pct = st.number_input("Profit Target (%)", min_value=1, max_value=100, value=10, key="sim_profit_pct")
+    sim_start = st.button("Start Auto-Trader Simulation", key="sim_start_btn")
 
     # State: one dict per symbol
     if 'auto_states' not in st.session_state or sim_start:
@@ -122,7 +125,7 @@ elif page == "Live Simulation":
             } for sym in symbols
         }
 
-    if st.button("Next Step (All Assets)"):
+    if st.button("Next Step (All Assets)", key="next_step_all_assets_btn"):
         for sym in symbols:
             state = st.session_state.auto_states[sym]
             df = all_data.get(sym)
