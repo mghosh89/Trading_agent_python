@@ -3,6 +3,7 @@ AGENT LOGIC:
 Allocates capital across assets
 * Create a button to submit after user set initial capital and target value at the bottom.
 
+Change- Pick random stock 
 
 Trades automatically using EMA + ATR
 Stops when target reached
