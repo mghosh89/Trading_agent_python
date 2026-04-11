@@ -5,4 +5,4 @@ numpy
 matplotlib
 ccxt
 plotly
-alpaca-trade-api
+alpaca-py

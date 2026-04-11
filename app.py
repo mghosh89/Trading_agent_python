@@ -9,7 +9,12 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import alpaca_trade_api as tradeapi
+import alpaca_trade_api as tradeapi  # fallback for REST API
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.enums import AdjustmentMixin
+from alpaca.trading.client import TradingClient
+from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.enums import OrderSide, TimeInForce
 import time
 
 st.set_page_config(layout="wide")
